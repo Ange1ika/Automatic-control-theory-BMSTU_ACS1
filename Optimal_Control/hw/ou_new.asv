@@ -1,0 +1,121 @@
+function luna25_shooting
+    sys.P = 450; 
+    sys.mu = 4902.8;
+    sys.K = 1000;
+    sys.tf = 500; 
+    sys.epsilon = 1e-6; 
+    sys.max_iter = 10000; 
+    sys.alpha = 0.1 * ones(5, 1); 
+
+    % Начальные условия состояния
+    sys.x0 = [0; 1800; 0; 1690; 1200];
+    % Терминальные условия
+    sys.xf = [50; 50; 2.121; 4.94975; 0];
+
+
+    sys.lambda0 = -ones(5, 1);
+
+    sys = find_lambda0(sys);
+  
+    [t, sol] = ode45(@(t, y) dynamics(t, y, sys), [0 sys.tf], [sys.x0; sys.lambda0]);
+
+    visualize_results(t, sol);
+end
+
+function sys = find_lambda0(sys)
+
+    prev_error_norms = inf(5, 1);
+    
+    for iter = 1:sys.max_iter
+
+        [t, sol] = ode45(@(t, y) dynamics(t, y, sys), [0 sys.tf], [sys.x0; sys.lambda0]);
+        disp(sol)
+        disp()
+        xf_computed = sol(end, 1:5)'; 
+        error = xf_computed - sys.xf;
+        
+        if norm(error) < sys.epsilon
+            disp("Условие точности достигнуто.");
+            break;
+        end
+        %disp(error)
+
+
+        for i = 1:length(error)
+            if abs(error(i)) > abs(prev_error_norms(i))
+                sys.alpha(i) = max(0.5 * sys.alpha(i), 1e-6); 
+                %disp(i)
+            else
+                sys.alpha(i) = min(1.1 * sys.alpha(i), 100); 
+                %disp(i)
+            end
+        end
+
+        prev_error_norms = error;
+        sys.lambda0 = sys.lambda0 - sys.alpha .* error;
+    end
+
+    if iter == sys.max_iter
+        disp("Достигнут лимит итераций. Решение может быть неточным.");
+    end
+end
+
+
+function dydt = dynamics(t, y, sys)
+    
+    x = y(1:5); % состояние
+    lambda = y(6:10); % сопряженные переменные
+    
+    % Уравнения состояния
+    phi = atan2(x(2), x(1));
+    u = atan2(lambda(3), lambda(4)); 
+    r = sqrt(x(1)^2 + x(2)^2);
+    
+    % Уравнения движения
+    dx1 = x(3);
+    dx2 = x(4);
+    dx3 = -sys.mu/(r^2) * sin(phi) - (sys.P * cos(u) * cos(phi)) / x(5) + ...
+        (sys.P * sin(u) * sin(phi)) / x(5);
+    dx4 = -sys.mu/(r^2) * cos(phi) + (sys.P * sin(u) * cos(phi)) / x(5) + ...
+        (sys.P * cos(u) * sin(phi)) / x(5);
+    dx5 = -sys.K * sys.P;
+    
+    % Уравнения для сопряженных переменных
+    dlambda1 = -lambda(3) * (-sys.mu * (-2 * x(1)^2 + x(2)^2) / r^5 ...
+                 - (sys.P * cos(u) * x(2) * x(1)) / (x(5) * r^3) ...
+                 - (sys.P * sin(u) * x(2)^2) / (x(5) * r^3)) ...
+              - lambda(4) * (-sys.mu * x(1) * x(2) / r^5 ...
+                 - (sys.P * sin(u) * x(1) * x(2)) / (x(5) * r^3) ...
+                 - (sys.P * cos(u) * x(2) * x(1)) / (x(5) * r^3));
+
+    dlambda2 = -lambda(3) * (-sys.mu * x(1) * x(2) / r^5 ...
+                 - (sys.P * sin(u) * x(1) * x(2)) / (x(5) * r^3) ...
+                 - (sys.P * cos(u) * x(2) * x(1)) / (x(5) * r^3)) ...
+              - lambda(4) * (-sys.mu * (-2 * x(2)^2 + x(1)^2) / r^5 ...
+                 - (sys.P * cos(u) * x(2)^2) / (x(5) * r^3) ...
+                 - (sys.P * sin(u) * x(2) * x(1)) / (x(5) * r^3));
+
+    dlambda3 = -2 * x(3) - lambda(1);
+
+    dlambda4 = -2 * x(4) - lambda(2);
+
+    dlambda5 = -(-lambda(3) * (-sys.P * cos(u) * x(2) + sys.P * sin(u) * x(1)) / ...
+                 (x(5)^2 * r) ...
+                 + lambda(4) * (-sys.P * sin(u) * x(2) + sys.P * cos(u) * x(1)) / ...
+                 (x(5)^2 * r));
+    dydt = [dx1; dx2; dx3; dx4; dx5; dlambda1; dlambda2; dlambda3; dlambda4; dlambda5];
+end
+
+function visualize_results(t, sol)
+    figure;
+    tiledlayout(5, 1, 'Padding', 'compact', 'TileSpacing', 'compact');
+
+    for i = 1:5
+        nexttile;
+        plot(t, sol(:, i), 'LineWidth', 2); 
+        grid on; 
+        title(sprintf('Значение x%d', i), 'FontSize', 12);
+        xlabel('Время', 'FontSize', 10);
+        ylabel(sprintf('x%d', i), 'FontSize', 10);
+    end
+end
